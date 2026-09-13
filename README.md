@@ -20,3 +20,21 @@ Summary of guidelines:
 * Include tests and documentation;
 * Clean up "oops" commits before submitting;
 * Follow the coding style guide.
+
+## Getting Started
+
+### Prerequisites
+- CMake
+- C++ compiler
+
+### Install
+```bash
+mkdir build && cd build
+cmake ..
+make -j$(nproc)
+```
+
+### Test
+```bash
+make test
+```
