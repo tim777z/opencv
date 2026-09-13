@@ -1,0 +1,5 @@
+services:
+  opencv:
+    build: .
+    volumes:
+      - .:/app
