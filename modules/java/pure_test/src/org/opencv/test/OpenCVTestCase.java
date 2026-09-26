@@ -230,8 +230,18 @@ public class OpenCVTestCase extends TestCase {
     }
 
     public static void fail(String msg) {
-        if(msg == "Not yet implemented" && passNYI)
+        if(msg == "Not yet implemented" && passNYI) {
+            // An unimplemented test that reports success is worse than a missing
+            // test, because the suite looks green. Keep the stub tolerated (other
+            // modules still have them) but make the gap visible in the output.
+            StackTraceElement[] trace = new Throwable().getStackTrace();
+            String where = trace.length > 1
+                    ? trace[1].getClassName() + "." + trace[1].getMethodName()
+                    : "<unknown>";
+            System.out.println(TAG + ": WARNING: " + where
+                    + " has no assertions yet (fail(\"Not yet implemented\") was ignored)");
             return;
+        }
         TestCase.fail(msg);
     }
 

@@ -1,0 +1,28 @@
+# Keep the build context small and deterministic: a Docker build must not depend
+# on leftovers from a previous local build, and must never ship local state into
+# an image layer.
+.git
+.github
+build/
+.cache/
+ccache/
+sdk/
+junk/
+
+# Editor / OS noise
+.idea/
+.vs/
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db
+
+# Never bake credentials or local configuration into an image
+.env
+*.pem
+*.key
+
+# Docs and CI are not needed to compile
+doc/
+docs/
+*.md

@@ -1,0 +1,13 @@
+# Build and test dependencies for the Python bindings in this directory.
+#
+# Pinned to exact versions on purpose:
+#   * numpy is capped below 2.0 because modules/python/src2 uses the numpy 1.x
+#     C API; numpy 2.x removed that ABI and silently breaks the extension module.
+#   * exact pins make a build reproducible, which is what CI and the container
+#     rely on (see requirements-dev.txt at the repository root for auditing).
+#
+# Install:  python -m pip install -r modules/python/requirements.txt
+
+numpy==1.26.4
+setuptools==75.1.0
+wheel==0.44.0

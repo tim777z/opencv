@@ -22,3 +22,20 @@ CMakeCache.txt
 *.suo
 *.log
 *.tlog
+
+# Out-of-source build trees. The documented layout is <repo>/build (see
+# README.md); the extra patterns catch the historical in-tree and nested
+# variants so a stray CMakeCache.txt is never committed.
+/build/
+/sdk/
+/junk/
+/.cache/
+ccache/
+CMakeCache.txt
+CMakeFiles/
+compile_commands.json
+*.junk
+*.pyo
+__pycache__/
+# Local configuration, never committed (.env.example IS committed).
+.env

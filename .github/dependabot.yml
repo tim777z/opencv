@@ -1,0 +1,41 @@
+version: 2
+
+updates:
+  # Keep the CI pipeline itself patched: a compromised or outdated action is a
+  # supply-chain entry point into every build of this repository.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+      - ci
+    commit-message:
+      prefix: 'ci(deps)'
+
+  # The pinned Python tooling (requirements-dev.txt) is audited by CI; Dependabot
+  # keeps the pins current and the advisory list empty by construction.
+  - package-ecosystem: pip
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+      - security
+    commit-message:
+      prefix: 'build(deps)'
+
+  # The container image is part of the developer and CI toolchain.
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: monthly
+    open-pull-requests-limit: 3
+    labels:
+      - dependencies
+    commit-message:
+      prefix: 'build(deps)'

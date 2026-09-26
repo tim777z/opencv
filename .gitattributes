@@ -82,3 +82,30 @@ org.eclipse.jdt.core.prefs -text whitespace=cr-at-eol merge=union
 *.vcxproj   text eol=crlf -whitespace merge=union
 
 *.sh        text eol=lf
+
+# ---------------------------------------------------------------------------
+# Generated / vendored files.
+#
+# Marking these as generated keeps tooling (language statistics, review views,
+# "files you should look at" heuristics) honest: nobody should review a table of
+# 16394 precomputed floats, and a real regression in hand-written code must not
+# hide behind generated noise.
+# ---------------------------------------------------------------------------
+
+# Lookup tables emitted by OpenEXR's table generator.
+3rdparty/openexr/IlmImf/b44ExpLogTable.h  linguist-generated=true -diff
+3rdparty/openexr/Half/toFloat.h          linguist-generated=true -diff
+3rdparty/openexr/Half/toFloat.cpp         linguist-generated=true -diff
+3rdparty/openexr/IlmImf/b44ExpLogTable.cpp linguist-generated=true -diff
+
+# Header parsers used by the C++/Java/Python binding generators.
+modules/python/src2/hdr_parser.py        linguist-generated=true
+
+# Headers produced by CMake at configure time (not in the tree today, but the
+# same rule should apply if they are ever committed).
+**/opencv2/opencv_modules.hpp            linguist-generated=true
+**/cvconfig.h                            linguist-generated=true
+
+# Test data and models: not source, not documentation.
+data/**                                  linguist-generated=true
+modules/**/test/testdata/**              linguist-generated=true
