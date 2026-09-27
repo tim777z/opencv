@@ -1,5 +1,70 @@
+# Build/dev/test environment for the OpenCV build.
+#
+#   docker compose build                     # build the image
+#   docker compose run --rm opencv           # configure + build + test
+#   docker compose run --rm opencv ctest --test-dir /src/build --output-on-failure
+#   docker compose run --rm opencv bash      # interactive shell in the toolchain
+#
+# All tunables come from a .env file next to this one; copy .env.example to .env
+# and adjust. Nothing is hard-coded here so that local runs, CI and the image
+# stay in sync through configuration instead of copy-paste.
+
 services:
   opencv:
-    build: .
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: dev
+      args:
+        BUILD_JOBS: ${BUILD_JOBS:-4}
+        OPENCV_TEST_DATA_PATH: ${OPENCV_TEST_DATA_PATH:-}
+    image: opencv-dev:local
+    init: true
+    working_dir: /src
+    environment:
+      BUILD_JOBS: ${BUILD_JOBS:-4}
+      CCACHE_DIR: /ccache
+      # Export this in your shell (or .env) after cloning opencv_extra, e.g.
+      #   git clone -b 3.0 --depth 1 https://github.com/Itseez/opencv_extra ..
+      OPENCV_TEST_DATA_PATH: ${OPENCV_TEST_DATA_PATH:-}
     volumes:
-      - .:/app
+      # Live source: edit on the host, rebuild inside the container. The mount
+      # point is /src, exactly where the image built, so the CMake cache baked
+      # into the image stays valid and rebuilds are incremental.
+      - .:/src
+      # Named volumes (not host bind mounts) keep the caches out of the working
+      # tree and out of .gitignore's way. Docker seeds them from the image on
+      # first use, so the prebuilt build/ and the ccache survive.
+      - build-cache:/src/build
+      - ccache:/ccache
+    command:
+      - bash
+      - -lc
+      - |
+        set -euo pipefail
+        cmake -S /src -B /src/build -G Ninja \
+          -DCMAKE_BUILD_TYPE=Release \
+          -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+          -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
+          -DOPENCV_TEST_DATA_PATH="$${OPENCV_TEST_DATA_PATH}" \
+          -DBUILD_TESTS=ON -DBUILD_PERF_TESTS=OFF -DBUILD_EXAMPLES=OFF \
+          -DBUILD_DOCS=OFF -DBUILD_opencv_apps=OFF -DBUILD_opencv_java=OFF \
+          -DBUILD_opencv_python2=OFF -DBUILD_opencv_python3=OFF \
+          -DBUILD_opencv_viz=OFF -DBUILD_opencv_videostab=OFF \
+          -DBUILD_opencv_superres=OFF -DBUILD_opencv_cudaarithm=OFF \
+          -DBUILD_opencv_cudabgsegm=OFF -DBUILD_opencv_cudacodec=OFF \
+          -DBUILD_opencv_cudafeatures2d=OFF -DBUILD_opencv_cudafilters=OFF \
+          -DBUILD_opencv_cudaimgproc=OFF -DBUILD_opencv_cudalegacy=OFF \
+          -DBUILD_opencv_cudaobjdetect=OFF -DBUILD_opencv_cudaoptflow=OFF \
+          -DBUILD_opencv_cudastereo=OFF -DBUILD_opencv_cudawarping=OFF \
+          -DBUILD_opencv_cudev=OFF -DBUILD_ZLIB=ON -DBUILD_PNG=ON \
+          -DBUILD_JPEG=ON -DBUILD_TIFF=ON -DBUILD_OPENEXR=ON \
+          -DWITH_1394=OFF -DWITH_CUDA=OFF -DWITH_EIGEN=OFF -DWITH_FFMPEG=OFF \
+          -DWITH_GSTREAMER=OFF -DWITH_GTK=OFF -DWITH_IPP=OFF -DWITH_JASPER=OFF \
+          -DWITH_OPENCL=OFF -DWITH_TBB=OFF -DWITH_V4L=OFF -DWITH_WEBP=OFF
+        cmake --build /src/build --parallel "$${BUILD_JOBS}"
+        exec ctest --test-dir /src/build --output-on-failure --timeout 900
+
+volumes:
+  build-cache:
+  ccache:

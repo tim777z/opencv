@@ -1,13 +1,211 @@
 name: CI
+
+# Build + test on every push and pull request.
+# Anything merged without a green run here is unverified, so failures are never
+# suppressed (no `continue-on-error`, no `|| true` in the build/test steps).
 on:
   push:
-    branches: [main, master]
+    branches: [master, main]
   pull_request:
-    branches: [main, master]
+  workflow_dispatch:
+
+# Least privilege: no job needs to write to the repository, create releases or
+# read secrets. If a dependency is ever compromised, this limits the blast radius.
+permissions:
+  contents: read
+
+# A new push to a PR cancels the previous in-flight run for that ref.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  BUILD_DIR: build
+  # ccache makes the second and every later build of a branch nearly free.
+  CCACHE_DIR: ${{ github.workspace }}/.ccache
+
 jobs:
-  build:
+  build-and-test:
+    name: Build & run test suite
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
-      - run: mkdir build && cd build && cmake .. && make -j$(nproc)
-      - run: cd build && make test
+
+      - name: Install build toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential ccache cmake ninja-build pkg-config
+
+      - name: Fetch test data (opencv_extra, branch 3.0)
+        # The accuracy tests read their fixtures from opencv_extra. Without it
+        # data-driven tests report FAIL_INVALID_TEST_DATA instead of passing.
+        # The branch must match this tree: 3.0 for CV_VERSION 3.0.0-dev.
+        run: |
+          git clone --depth 1 --branch 3.0 https://github.com/opencv/opencv_extra.git \
+            "$RUNNER_TEMP/opencv_extra"
+          echo "OPENCV_TEST_DATA_PATH=$RUNNER_TEMP/opencv_extra" >> "$GITHUB_ENV"
+
+      - name: Restore ccache
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.CCACHE_DIR }}
+          key: ccache-${{ runner.os }}-${{ hashFiles('CMakeLists.txt', 'cmake/**', 'modules/**/CMakeLists.txt', '.github/workflows/ci.yml') }}
+          restore-keys: |
+            ccache-${{ runner.os }}-
+
+      - name: Configure
+        # Keep the module set explicit: the same flags are used by the Dockerfile
+        # and documented in README.md, so local/CI/container builds agree.
+        run: |
+          cmake -S . -B "$BUILD_DIR" -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
+            -DOPENCV_TEST_DATA_PATH="$OPENCV_TEST_DATA_PATH" \
+            -DBUILD_TESTS=ON \
+            -DBUILD_PERF_TESTS=OFF \
+            -DBUILD_EXAMPLES=OFF \
+            -DBUILD_DOCS=OFF \
+            -DBUILD_opencv_apps=OFF \
+            -DBUILD_opencv_java=OFF \
+            -DBUILD_opencv_python2=OFF \
+            -DBUILD_opencv_python3=OFF \
+            -DBUILD_opencv_viz=OFF \
+            -DBUILD_opencv_videostab=OFF \
+            -DBUILD_opencv_superres=OFF \
+            -DBUILD_opencv_cudaarithm=OFF \
+            -DBUILD_opencv_cudabgsegm=OFF \
+            -DBUILD_opencv_cudacodec=OFF \
+            -DBUILD_opencv_cudafeatures2d=OFF \
+            -DBUILD_opencv_cudafilters=OFF \
+            -DBUILD_opencv_cudaimgproc=OFF \
+            -DBUILD_opencv_cudalegacy=OFF \
+            -DBUILD_opencv_cudaobjdetect=OFF \
+            -DBUILD_opencv_cudaoptflow=OFF \
+            -DBUILD_opencv_cudastereo=OFF \
+            -DBUILD_opencv_cudawarping=OFF \
+            -DBUILD_opencv_cudev=OFF \
+            -DBUILD_ZLIB=ON \
+            -DBUILD_PNG=ON \
+            -DBUILD_JPEG=ON \
+            -DBUILD_TIFF=ON \
+            -DBUILD_OPENEXR=ON \
+            -DWITH_1394=OFF \
+            -DWITH_CUDA=OFF \
+            -DWITH_EIGEN=OFF \
+            -DWITH_FFMPEG=OFF \
+            -DWITH_GSTREAMER=OFF \
+            -DWITH_GTK=OFF \
+            -DWITH_IPP=OFF \
+            -DWITH_JASPER=OFF \
+            -DWITH_OPENCL=OFF \
+            -DWITH_TBB=OFF \
+            -DWITH_V4L=OFF \
+            -DWITH_WEBP=OFF
+
+      - name: Build
+        run: cmake --build "$BUILD_DIR" --parallel "$(nproc)"
+
+      - name: Test
+        # --output-on-failure is what makes a red run actionable; --timeout
+        # stops one hung test from burning the whole 60 minute budget.
+        run: ctest --test-dir "$BUILD_DIR" --output-on-failure --timeout 900
+
+  lint:
+    name: Lint & repository hygiene
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install lint tooling
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends clang-format
+          python -m pip install --disable-pip-version-check pyyaml
+
+      - name: clang-format configuration must be valid
+        # A malformed .clang-format silently makes every local `clang-format -i`
+        # a no-op or an error, so validate it in CI.
+        run: |
+          clang-format --version
+          clang-format --dump-config > /dev/null
+          clang-format --style=file --dump-config > /dev/null
+
+      - name: No trailing whitespace in build and docs files we own
+        run: |
+          set -euo pipefail
+          files=$(git ls-files -- \
+            '.github/*' 'Dockerfile' 'docker-compose.yml' 'requirements*.txt' \
+            'docs/*' '*.md' 'SECURITY.md')
+          if [ -z "$files" ]; then
+            echo "no files matched the hygiene path list" >&2
+            exit 1
+          fi
+          if grep -nE '[[:blank:]]+$' $files; then
+            echo "trailing whitespace found (see above)" >&2
+            exit 1
+          fi
+
+      - name: No hard tabs in YAML (YAML forbids tabs for indentation)
+        run: |
+          set -euo pipefail
+          files=$(git ls-files -- '*.yml' '*.yaml')
+          if [ -z "$files" ]; then
+            echo "no YAML files tracked" >&2
+            exit 1
+          fi
+          if grep -nP '\t' $files; then
+            echo "tab characters found in YAML (see above)" >&2
+            exit 1
+          fi
+
+      - name: Workflow files must be valid YAML
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import glob, sys
+          try:
+              import yaml
+          except ImportError:
+              sys.exit("PyYAML is required by this CI step")
+          failed = False
+          for path in glob.glob(".github/workflows/*.yml"):
+              with open(path, encoding="utf-8") as fh:
+                  try:
+                      yaml.safe_load(fh)
+                  except Exception as exc:  # noqa: BLE001 - report and fail the job
+                      print(f"{path}: {exc}", file=sys.stderr)
+                      failed = True
+              else:
+                  print(f"{path}: ok")
+          sys.exit(1 if failed else 0)
+          PY
+
+  dependency-audit:
+    name: Dependency audit
+    # Flag known-vulnerable pinned Python dependencies on every PR.
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install pinned tooling
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements-dev.txt
+
+      - name: pip-audit
+        # --strict fails on unpinned requirements as well as on advisories.
+        run: python -m pip_audit --requirement requirements-dev.txt --strict

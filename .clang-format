@@ -1,0 +1,44 @@
+---
+# Formatting rules for this repository.
+#
+# Scope: use it on code you add or rewrite. The historical tree predates
+# clang-format and is NOT reformatted wholesale - doing so would bury real
+# changes under thousands of cosmetic lines. ColumnLimit is therefore 0, which
+# tells clang-format to keep the line breaks the author wrote.
+#
+#   clang-format --style=file -i <file>          # format in place
+#   clang-format --style=file --dry-run -Werror # check only
+#
+# CI validates that this file parses (a broken config silently turns every
+# local format run into a no-op) and enforces the whitespace rules below.
+Language: Cpp
+BasedOnStyle: LLVM
+
+# OpenCV code style: 4 spaces, never tabs, braces on the same line for control
+# statements and on the next line for functions/classes/namespaces.
+IndentWidth: 4
+ContinuationIndentWidth: 4
+TabWidth: 4
+UseTab: Never
+BreakBeforeBraces: Linux
+IndentCaseLabels: false
+AccessModifierOffset: -4
+
+# Do not rewrap existing code: ColumnLimit 0 = respect existing line breaks.
+ColumnLimit: 0
+
+# Header order in OpenCV is meaningful (project headers before 3rdparty ones).
+SortIncludes: false
+IncludeBlocks: Preserve
+
+# OpenCV does not use "using namespace" sprinkles in headers and keeps braces
+# around single-statement bodies; keep the diffs local and predictable.
+AllowShortFunctionsOnASingleLine: Empty
+AllowShortIfStatementsOnASingleLine: false
+AllowShortLoopsOnASingleLine: false
+SpaceBeforeParens: ControlStatements
+PointerAlignment: Right
+DerivePointerAlignment: false
+IndentPPDirectives: None
+KeepEmptyLinesAtTheStartOfBlocks: false
+MaxEmptyLinesToKeep: 2

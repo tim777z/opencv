@@ -1,0 +1,14 @@
+# Repository-wide Python tooling, pinned to exact versions.
+#
+# This is the only dependency manifest in the project that is installed by
+# automation, so it is also the file audited for known vulnerabilities:
+#   python -m pip install -r requirements-dev.txt
+#   python -m pip_audit --requirement requirements-dev.txt --strict
+# The second command runs on every pull request (see .github/workflows/ci.yml),
+# and Dependabot keeps the pins current (.github/dependabot.yml).
+
+# Python bindings build/test dependencies.
+-r modules/python/requirements.txt
+
+# Dependency vulnerability scanner used by CI.
+pip-audit==2.7.3
