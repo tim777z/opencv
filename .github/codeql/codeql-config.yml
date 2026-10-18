@@ -1,0 +1,33 @@
+# CodeQL configuration for OpenCV C/C++ codebase
+#
+# This file customizes the CodeQL analysis to focus on security-relevant
+# patterns in a computer vision library: memory safety, integer overflows,
+# buffer handling, and input validation in file parsers.
+
+name: "OpenCV CodeQL Config"
+
+# Disable default queries and use only security-focused suites
+disable-default-queries: true
+
+queries:
+  # Security-extended: CWE coverage beyond the default suite
+  - uses: security-extended
+  # Security-and-quality: adds maintainability/reliability queries
+  - uses: security-and-quality
+
+# Path filters: exclude generated code, third-party vendored sources,
+# and test files from analysis (they add noise and are not our code to fix).
+paths-ignore:
+  - "3rdparty/**"
+  - "build*/**"
+  - "**/test/**"
+  - "**/perf/**"
+  - "**/samples/**"
+  - "modules/*/gen/**"
+  - "platforms/**"
+  - "*.generated.*"
+  - "*_generated.*"
+
+# Custom query packs can be added here if needed
+# packs:
+#   - github/codeql-cpp-queries@main
