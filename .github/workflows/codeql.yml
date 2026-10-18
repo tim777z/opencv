@@ -1,0 +1,102 @@
+name: CodeQL Analysis
+
+# Security-focused static analysis for C/C++ codebase.
+# Runs on schedule, on push to default branch, and on pull requests.
+# Results appear in the Security tab and as PR annotations.
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+    branches: [master, main]
+  schedule:
+    - cron: '0 6 * * 1'  # Weekly on Monday 06:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  security-events: write
+  actions: read
+
+jobs:
+  analyze:
+    name: CodeQL C/C++ Analysis
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        language: [cpp]
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: ${{ matrix.language }}
+          # Use the extended query suite for deeper coverage
+          queries: +security-extended,+security-and-quality
+          config-file: .github/codeql/codeql-config.yml
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential cmake ninja-build pkg-config
+
+      - name: Configure build for CodeQL
+        # Use the same minimal flag set as CI/Dockerfile so the analysis
+        # covers the exact code paths that ship.
+        run: |
+          cmake -S . -B build-codeql -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DBUILD_TESTS=OFF \
+            -DBUILD_PERF_TESTS=OFF \
+            -DBUILD_EXAMPLES=OFF \
+            -DBUILD_DOCS=OFF \
+            -DBUILD_opencv_apps=OFF \
+            -DBUILD_opencv_java=OFF \
+            -DBUILD_opencv_python2=OFF \
+            -DBUILD_opencv_python3=OFF \
+            -DBUILD_opencv_viz=OFF \
+            -DBUILD_opencv_videostab=OFF \
+            -DBUILD_opencv_superres=OFF \
+            -DBUILD_opencv_cudaarithm=OFF \
+            -DBUILD_opencv_cudabgsegm=OFF \
+            -DBUILD_opencv_cudacodec=OFF \
+            -DBUILD_opencv_cudafeatures2d=OFF \
+            -DBUILD_opencv_cudafilters=OFF \
+            -DBUILD_opencv_cudaimgproc=OFF \
+            -DBUILD_opencv_cudalegacy=OFF \
+            -DBUILD_opencv_cudaobjdetect=OFF \
+            -DBUILD_opencv_cudaoptflow=OFF \
+            -DBUILD_opencv_cudastereo=OFF \
+            -DBUILD_opencv_cudawarping=OFF \
+            -DBUILD_opencv_cudev=OFF \
+            -DBUILD_ZLIB=ON \
+            -DBUILD_PNG=ON \
+            -DBUILD_JPEG=ON \
+            -DBUILD_TIFF=ON \
+            -DBUILD_OPENEXR=ON \
+            -DWITH_1394=OFF \
+            -DWITH_CUDA=OFF \
+            -DWITH_EIGEN=OFF \
+            -DWITH_FFMPEG=OFF \
+            -DWITH_GSTREAMER=OFF \
+            -DWITH_GTK=OFF \
+            -DWITH_IPP=OFF \
+            -DWITH_JASPER=OFF \
+            -DWITH_OPENCL=OFF \
+            -DWITH_TBB=OFF \
+            -DWITH_V4L=OFF \
+            -DWITH_WEBP=OFF
+
+      - name: Build for CodeQL analysis
+        run: cmake --build build-codeql --parallel "$(nproc)"
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v3
+        with:
+          category: "/language:${{ matrix.language }}"
+          upload: true

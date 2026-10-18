@@ -13,6 +13,7 @@ on:
 # read secrets. If a dependency is ever compromised, this limits the blast radius.
 permissions:
   contents: read
+  security-events: write  # For CodeQL SARIF uploads
 
 # A new push to a PR cancels the previous in-flight run for that ref.
 concurrency:
@@ -113,6 +114,59 @@ jobs:
         # stops one hung test from burning the whole 60 minute budget.
         run: ctest --test-dir "$BUILD_DIR" --output-on-failure --timeout 900
 
+      - name: Run address sanitizer build (fast subset)
+        # ASan catches memory errors at runtime. We run a quick build with
+        # a subset of modules to keep the time budget reasonable.
+        if: github.event_name == 'pull_request'
+        run: |
+          cmake -S . -B build-asan -G Ninja \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DCMAKE_C_FLAGS="-fsanitize=address -fno-omit-frame-pointer" \
+            -DCMAKE_CXX_FLAGS="-fsanitize=address -fno-omit-frame-pointer" \
+            -DCMAKE_LINKER_FLAGS="-fsanitize=address" \
+            -DBUILD_TESTS=ON \
+            -DBUILD_PERF_TESTS=OFF \
+            -DBUILD_EXAMPLES=OFF \
+            -DBUILD_DOCS=OFF \
+            -DBUILD_opencv_apps=OFF \
+            -DBUILD_opencv_java=OFF \
+            -DBUILD_opencv_python2=OFF \
+            -DBUILD_opencv_python3=OFF \
+            -DBUILD_opencv_viz=OFF \
+            -DBUILD_opencv_videostab=OFF \
+            -DBUILD_opencv_superres=OFF \
+            -DBUILD_opencv_cudaarithm=OFF \
+            -DBUILD_opencv_cudabgsegm=OFF \
+            -DBUILD_opencv_cudacodec=OFF \
+            -DBUILD_opencv_cudafeatures2d=OFF \
+            -DBUILD_opencv_cudafilters=OFF \
+            -DBUILD_opencv_cudaimgproc=OFF \
+            -DBUILD_opencv_cudalegacy=OFF \
+            -DBUILD_opencv_cudaobjdetect=OFF \
+            -DBUILD_opencv_cudaoptflow=OFF \
+            -DBUILD_opencv_cudastereo=OFF \
+            -DBUILD_opencv_cudawarping=OFF \
+            -DBUILD_opencv_cudev=OFF \
+            -DBUILD_ZLIB=ON \
+            -DBUILD_PNG=ON \
+            -DBUILD_JPEG=ON \
+            -DBUILD_TIFF=ON \
+            -DBUILD_OPENEXR=ON \
+            -DWITH_1394=OFF \
+            -DWITH_CUDA=OFF \
+            -DWITH_EIGEN=OFF \
+            -DWITH_FFMPEG=OFF \
+            -DWITH_GSTREAMER=OFF \
+            -DWITH_GTK=OFF \
+            -DWITH_IPP=OFF \
+            -DWITH_JASPER=OFF \
+            -DWITH_OPENCL=OFF \
+            -DWITH_TBB=OFF \
+            -DWITH_V4L=OFF \
+            -DWITH_WEBP=OFF
+          cmake --build build-asan --parallel "$(nproc)" --target opencv_test_core opencv_test_imgproc opencv_test_imgcodecs
+          ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 ctest --test-dir build-asan --output-on-failure -R "opencv_test_(core|imgproc|imgcodecs)" --timeout 300
+
   lint:
     name: Lint & repository hygiene
     runs-on: ubuntu-latest
@@ -209,3 +263,156 @@ jobs:
       - name: pip-audit
         # --strict fails on unpinned requirements as well as on advisories.
         run: python -m pip_audit --requirement requirements-dev.txt --strict
+
+  secret-scan:
+    name: Secret scanning
+    # Detect committed secrets, API keys, tokens, and credentials.
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Full history for secret scanning
+
+      - name: Run Gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        with:
+          args: --verbose --no-banner --redact
+
+  container-scan:
+    name: Container vulnerability scan
+    # Scan the built container image for known vulnerabilities using Trivy.
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build container image (toolchain stage)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile
+          target: toolchain
+          load: true
+          tags: opencv-dev:ci-scan
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: opencv-dev:ci-scan
+          format: sarif
+          output: trivy-results.sarif
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          vuln-type: os,library
+
+      - name: Upload Trivy results to GitHub Security
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: trivy-results.sarif
+          category: container-scan
+
+  cmake-security:
+    name: CMake security hardening check
+    # Verify that security-relevant CMake policies and compiler flags are set.
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check for security hardening flags in CMake
+        run: |
+          set -euo pipefail
+          echo "Checking for security hardening configurations..."
+          
+          # Check for FORTIFY_SOURCE
+          if ! grep -r "FORTIFY_SOURCE" cmake/ CMakeLists.txt 2>/dev/null; then
+            echo "::warning::FORTIFY_SOURCE not explicitly set in CMake files"
+          else
+            echo "✓ FORTIFY_SOURCE found"
+          fi
+          
+          # Check for stack protector
+          if ! grep -r "stack-protector" cmake/ CMakeLists.txt 2>/dev/null; then
+            echo "::warning::Stack protector not explicitly configured"
+          else
+            echo "✓ Stack protector found"
+          fi
+          
+          # Check for PIE/PIC
+          if ! grep -r "POSITION_INDEPENDENT_CODE\|CMAKE_POSITION_INDEPENDENT_CODE" cmake/ CMakeLists.txt 2>/dev/null; then
+            echo "::warning::Position Independent Code not explicitly enabled"
+          else
+            echo "✓ PIE/PIC found"
+          fi
+          
+          # Check for RELRO
+          if ! grep -r "RELRO\|BIND_NOW" cmake/ CMakeLists.txt 2>/dev/null; then
+            echo "::warning::RELRO/BIND_NOW not explicitly configured"
+          else
+            echo "✓ RELRO found"
+          fi
+          
+          # Check for format security
+          if ! grep -r "format-security\|FORMAT_SECURITY" cmake/ CMakeLists.txt 2>/dev/null; then
+            echo "::warning::Format security not explicitly configured"
+          else
+            echo "✓ Format security found"
+          fi
+          
+          echo "CMake security hardening check completed (warnings are informational)"
+
+  license-check:
+    name: License compliance
+    # Verify that all dependencies have acceptable licenses.
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check Python dependency licenses
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install pip-licenses
+          python -m pip install -r requirements-dev.txt
+          # Check for problematic licenses (GPL, AGPL, etc. in a permissive project)
+          python -m pip_licenses --format=json --with-urls > licenses.json
+          python - <<'PY'
+          import json, sys
+          with open('licenses.json') as f:
+              deps = json.load(f)
+          problematic = ['GPL', 'AGPL', 'LGPL', 'SSPL', 'BSL', 'Commons Clause']
+          violations = []
+          for dep in deps:
+              license_name = dep.get('License', '').upper()
+              for bad in problematic:
+                  if bad in license_name:
+                      violations.append(f"{dep['Name']} ({dep['Version']}): {dep['License']}")
+          if violations:
+              print("::error::Problematic licenses found:")
+              for v in violations:
+                  print(f"  {v}")
+              sys.exit(1)
+          else:
+              print("✓ All Python dependencies have acceptable licenses")
+          PY
+
+      - name: Check vendored third-party licenses
+        run: |
+          # Verify 3rdparty/ directories have license files
+          for dir in 3rdparty/*/; do
+            if [ -d "$dir" ]; then
+              name=$(basename "$dir")
+              if [ ! -f "$dir/LICENSE" ] && [ ! -f "$dir/COPYING" ] && [ ! -f "$dir/license.txt" ] && [ ! -f "$dir/License.txt" ]; then
+                echo "::warning::3rdparty/$name: No license file found"
+              else
+                echo "✓ 3rdparty/$name: License file present"
+              fi
+            fi
+          done

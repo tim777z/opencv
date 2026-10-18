@@ -1,0 +1,223 @@
+name: Release
+
+# Automated release workflow for tagged commits.
+# Validates the tag, builds artifacts, generates changelog, and creates
+# a GitHub Release with SBOMs and build metadata attached.
+
+on:
+  push:
+    tags:
+      - 'v*'
+      - 'perf*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to release (must exist locally or be pushed)'
+        required: true
+        type: string
+
+permissions:
+  contents: write
+  packages: read
+  id-token: write
+
+jobs:
+  validate-tag:
+    name: Validate tag format
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      version: ${{ steps.parse.outputs.version }}
+      is-prerelease: ${{ steps.parse.outputs.is-prerelease }}
+    steps:
+      - name: Determine tag
+        id: tag
+        run: |
+          if [ -n "${{ github.event.inputs.tag }}" ]; then
+            echo "tag=${{ github.event.inputs.tag }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Parse version from tag
+        id: parse
+        run: |
+          TAG="${{ steps.tag.outputs.tag }}"
+          # Accept vX.Y.Z, vX.Y.Z-rcN, perfX.Y.Z, etc.
+          if [[ "$TAG" =~ ^v?([0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9.]+)?)$ ]]; then
+            VERSION="${BASH_REMATCH[1]}"
+            echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+            if [[ "$VERSION" =~ - ]]; then
+              echo "is-prerelease=true" >> "$GITHUB_OUTPUT"
+            else
+              echo "is-prerelease=false" >> "$GITHUB_OUTPUT"
+            fi
+          elif [[ "$TAG" =~ ^perf([0-9]+[a-z]?)$ ]]; then
+            # Performance tags like perf4au
+            VERSION="${BASH_REMATCH[1]}"
+            echo "version=perf-$VERSION" >> "$GITHUB_OUTPUT"
+            echo "is-prerelease=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::error::Tag '$TAG' does not match expected format (vX.Y.Z, vX.Y.Z-rcN, or perfXXX)"
+            exit 1
+          fi
+
+  build-release:
+    name: Build release artifacts
+    needs: validate-tag
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Needed for changelog generation
+
+      - name: Install build toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential ccache cmake ninja-build pkg-config
+
+      - name: Configure release build
+        run: |
+          cmake -S . -B build-release -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
+            -DBUILD_TESTS=OFF \
+            -DBUILD_PERF_TESTS=OFF \
+            -DBUILD_EXAMPLES=OFF \
+            -DBUILD_DOCS=ON \
+            -DBUILD_opencv_apps=ON \
+            -DBUILD_opencv_java=ON \
+            -DBUILD_opencv_python2=OFF \
+            -DBUILD_opencv_python3=ON \
+            -DBUILD_opencv_viz=ON \
+            -DBUILD_opencv_videostab=ON \
+            -DBUILD_opencv_superres=ON \
+            -DBUILD_ZLIB=ON \
+            -DBUILD_PNG=ON \
+            -DBUILD_JPEG=ON \
+            -DBUILD_TIFF=ON \
+            -DBUILD_OPENEXR=ON \
+            -DWITH_1394=OFF \
+            -DWITH_CUDA=OFF \
+            -DWITH_EIGEN=OFF \
+            -DWITH_FFMPEG=ON \
+            -DWITH_GSTREAMER=ON \
+            -DWITH_GTK=ON \
+            -DWITH_IPP=OFF \
+            -DWITH_JASPER=OFF \
+            -DWITH_OPENCL=ON \
+            -DWITH_TBB=ON \
+            -DWITH_V4L=ON \
+            -DWITH_WEBP=ON
+
+      - name: Build
+        run: cmake --build build-release --parallel "$(nproc)"
+
+      - name: Package headers and libraries
+        run: |
+          cmake --install build-release --prefix install-release
+          tar -czf opencv-${{ needs.validate-tag.outputs.version }}-linux-headers.tar.gz -C install-release include
+          tar -czf opencv-${{ needs.validate-tag.outputs.version }}-linux-libs.tar.gz -C install-release lib
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-artifacts
+          path: |
+            opencv-*-linux-headers.tar.gz
+            opencv-*-linux-libs.tar.gz
+          retention-days: 90
+
+  generate-changelog:
+    name: Generate changelog
+    needs: validate-tag
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      changelog: ${{ steps.changelog.outputs.changelog }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Generate changelog from commits
+        id: changelog
+        run: |
+          TAG="${{ needs.validate-tag.outputs.version }}"
+          PREV_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
+          if [ -n "$PREV_TAG" ]; then
+            RANGE="$PREV_TAG..HEAD"
+          else
+            RANGE="HEAD"
+          fi
+          CHANGELOG=$(git log $RANGE --pretty=format:"- %s (%h)" --reverse | head -200)
+          # Escape for JSON output
+          CHANGELOG_ESCAPED=$(echo "$CHANGELOG" | sed ':a;N;$!ba;s/\n/\\n/g' | sed 's/"/\\"/g')
+          echo "changelog=$CHANGELOG_ESCAPED" >> "$GITHUB_OUTPUT"
+
+  create-release:
+    name: Create GitHub Release
+    needs: [validate-tag, build-release, generate-changelog, sbom]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: release-artifacts
+          path: release-artifacts
+
+      - name: Download SBOMs
+        uses: actions/download-artifact@v4
+        with:
+          name: sbom-container
+          path: sbom-container
+
+      - name: Download Python SBOM
+        uses: actions/download-artifact@v4
+        with:
+          name: sbom-python
+          path: sbom-python
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: OpenCV ${{ needs.validate-tag.outputs.version }}
+          body: |
+            ## OpenCV ${{ needs.validate-tag.outputs.version }}
+
+            ### Changes
+            ${{ needs.generate-changelog.outputs.changelog }}
+
+            ### Build Information
+            - **Commit**: ${{ github.sha }}
+            - **Date**: ${{ github.event.head_commit.timestamp }}
+            - **Builder**: GitHub Actions (ubuntu-latest)
+
+            ### Artifacts
+            - `opencv-${{ needs.validate-tag.outputs.version }}-linux-headers.tar.gz` - Public headers
+            - `opencv-${{ needs.validate-tag.outputs.version }}-linux-libs.tar.gz` - Compiled libraries
+
+            ### Supply Chain
+            - SBOM (SPDX): `sbom-container.spdx.json`
+            - SBOM (CycloneDX): `sbom-container.cyclonedx.json`
+            - Python SBOM: `sbom-python.cyclonedx.json`
+
+            ### Verification
+            See [Security Policy](SECURITY.md) for vulnerability reporting.
+          draft: false
+          prerelease: ${{ needs.validate-tag.outputs.is-prerelease }}
+          files: |
+            release-artifacts/opencv-*-linux-headers.tar.gz
+            release-artifacts/opencv-*-linux-libs.tar.gz
+            sbom-container/sbom-container.spdx.json
+            sbom-container/sbom-container.cyclonedx.json
+            sbom-python/sbom-python.cyclonedx.json
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

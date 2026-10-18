@@ -1,0 +1,114 @@
+# Pre-commit hooks for OpenCV repository
+#
+# Install: pip install pre-commit && pre-commit install
+# Run manually: pre-commit run --all-files
+#
+# These hooks enforce the same checks that CI runs, catching issues
+# before they reach the shared repository.
+
+repos:
+  # General file hygiene
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+        exclude: ^(3rdparty/|build/|.*\.generated\.)
+      - id: end-of-file-fixer
+        exclude: ^(3rdparty/|build/|.*\.generated\.)
+      - id: check-yaml
+        exclude: ^(3rdparty/|build/)
+      - id: check-added-large-files
+        args: ['--maxkb=500']
+      - id: check-merge-conflict
+      - id: detect-private-key
+      - id: mixed-line-ending
+        args: ['--fix=lf']
+
+  # C/C++ formatting with clang-format
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: clang-format
+        name: clang-format (C/C++)
+        entry: clang-format
+        args: ['--style=file', '-i']
+        types: [c, cpp, cuda, objc, objcpp]
+        exclude: ^(3rdparty/|build/|.*\.generated\.)
+        require_serial: true
+
+  # YAML formatting
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: check-yaml
+        name: Validate YAML syntax
+        exclude: ^(3rdparty/|build/)
+
+  # Python formatting and linting (for binding generators and scripts)
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.5.7
+    hooks:
+      - id: ruff
+        name: Ruff (Python lint/format)
+        args: [--fix, --exit-non-zero-on-fix]
+        types: [python]
+        exclude: ^(3rdparty/|build/)
+
+  # CMake formatting
+  - repo: https://github.com/cheshirekow/cmake-format-precommit
+    rev: v0.6.10
+    hooks:
+      - id: cmake-format
+        name: cmake-format
+        args: ['-i']
+        types: [cmake]
+        exclude: ^(3rdparty/|build/)
+
+  # Secret detection
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.18.2
+    hooks:
+      - id: gitleaks
+        name: Gitleaks secret scan
+        args: ['--verbose', '--no-banner']
+
+  # Shell script linting
+  - repo: https://github.com/shellcheck-py/shellcheck-py
+    rev: v0.10.0.1
+    hooks:
+      - id: shellcheck
+        name: ShellCheck
+        types: [shell]
+        exclude: ^(3rdparty/|build/)
+
+  # Dockerfile linting
+  - repo: https://github.com/hadolint/hadolint
+    rev: v2.12.0
+    hooks:
+      - id: hadolint
+        name: Hadolint (Dockerfile)
+        args: ['--failure-threshold=error']
+        types: [dockerfile]
+
+  # Markdown linting
+  - repo: https://github.com/markdownlint/markdownlint
+    rev: v0.12.0
+    hooks:
+      - id: markdownlint
+        name: Markdown lint
+        args: ['--config', '.markdownlint.json']
+        exclude: ^(3rdparty/|build/)
+
+  # Spell checking (optional, can be noisy)
+  - repo: https://github.com/codespell-project/codespell
+    rev: v2.3.0
+    hooks:
+      - id: codespell
+        name: Codespell
+        args: ['--skip=3rdparty,build,*.generated.*,*_generated.*', '--ignore-words=.codespellignore']
+        exclude: ^(3rdparty/|build/|.*\.generated\.|.*_generated\.)
+
+# Configuration for tools that need it
+ci:
+  autofix_commit_msg: "style: pre-commit auto-fixes"
+  autoupdate_commit_msg: "chore: update pre-commit hooks"

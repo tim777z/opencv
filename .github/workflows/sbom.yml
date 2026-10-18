@@ -1,0 +1,143 @@
+name: SBOM Generation
+
+# Software Bill of Materials generation for supply chain transparency.
+# Produces SPDX and CycloneDX SBOMs for the container image and the
+# Python tooling dependencies. Artifacts are uploaded for each run and
+# attached to releases when tagged.
+
+on:
+  push:
+    branches: [master, main]
+    tags: ['v*', 'perf*']
+  pull_request:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 2 * * 0'  # Weekly on Sunday 02:00 UTC
+
+permissions:
+  contents: read
+  packages: read
+  id-token: write  # For OIDC token to sign attestations (future)
+
+jobs:
+  sbom-container:
+    name: Container Image SBOM
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    outputs:
+      sbom-path: ${{ steps.syft.outputs.sbom-path }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build container image (toolchain stage only for speed)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile
+          target: toolchain
+          load: true
+          tags: opencv-dev:sbom
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Generate SBOM with Syft
+        id: syft
+        uses: anchore/sbom-action@v0
+        with:
+          image: opencv-dev:sbom
+          format: spdx-json,cyclonedx-json
+          output-file: sbom-container.spdx.json
+
+      - name: Upload SBOM as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom-container
+          path: |
+            sbom-container.spdx.json
+            sbom-container.cyclonedx.json
+          retention-days: 90
+
+      - name: Attach SBOM to release (on tag push)
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ github.event.release.upload_url }}
+          asset_path: sbom-container.spdx.json
+          asset_name: sbom-container.spdx.json
+          asset_content_type: application/json
+
+  sbom-python:
+    name: Python Dependencies SBOM
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements-dev.txt
+          python -m pip install cyclonedx-bom
+
+      - name: Generate CycloneDX SBOM for Python deps
+        run: |
+          cyclonedx-py -o sbom-python.cyclonedx.json --format json
+
+      - name: Upload SBOM as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom-python
+          path: sbom-python.cyclonedx.json
+          retention-days: 90
+
+      - name: Attach SBOM to release (on tag push)
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ github.event.release.upload_url }}
+          asset_path: sbom-python.cyclonedx.json
+          asset_name: sbom-python.cyclonedx.json
+          asset_content_type: application/json
+
+  sbom-attest:
+    name: SBOM Attestation (SLSA)
+    needs: [sbom-container, sbom-python]
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      id-token: write
+      attestations: write
+      contents: read
+    steps:
+      - name: Download container SBOM
+        uses: actions/download-artifact@v4
+        with:
+          name: sbom-container
+          path: sbom-artifacts
+
+      - name: Download Python SBOM
+        uses: actions/download-artifact@v4
+        with:
+          name: sbom-python
+          path: sbom-artifacts
+
+      - name: Generate SLSA provenance attestation
+        uses: slsa-framework/slsa-github-generator/.github/workflows/generator_generic_slsa3.yml@v1.9.0
+        with:
+          base64-subjects: "${{ toJson(github.event.repository) }}"
+          provenance-name: slsa-provenance.intoto.jsonl
