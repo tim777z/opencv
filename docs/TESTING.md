@@ -12,16 +12,25 @@ Two suites exist and they are not interchangeable:
 
 ```bash
 cmake -S . -B build -G Ninja -DBUILD_TESTS=ON \
-      -DOPENCV_TEST_DATA_PATH="$PWD/../opencv_extra"
+      -DOPENCV_TEST_DATA_PATH="$PWD/.cache/opencv_extra"
 cmake --build build --parallel $(nproc)
 ctest --test-dir build --output-on-failure
 ```
 
 `OPENCV_TEST_DATA_PATH` must point at an `opencv_extra` checkout on the branch
-that matches this tree (`3.0`):
+that matches this tree (`3.0`). For a reproducible fresh-clone setup, use the
+repository helper (idempotent, shallow clone/update):
+
+```bash
+./scripts/fetch-test-data.sh .cache/opencv_extra
+export OPENCV_TEST_DATA_PATH="$PWD/.cache/opencv_extra"
+```
+
+Manual equivalent:
 
 ```bash
 git clone -b 3.0 --depth 1 https://github.com/opencv/opencv_extra ../opencv_extra
+export OPENCV_TEST_DATA_PATH="$PWD/../opencv_extra"
 ```
 
 The test binaries read the same name as an environment variable, so you can also

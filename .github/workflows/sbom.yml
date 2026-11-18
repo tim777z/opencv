@@ -61,17 +61,8 @@ jobs:
             sbom-container.cyclonedx.json
           retention-days: 90
 
-      - name: Attach SBOM to release (on tag push)
-        if: startsWith(github.ref, 'refs/tags/')
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ github.event.release.upload_url }}
-          asset_path: sbom-container.spdx.json
-          asset_name: sbom-container.spdx.json
-          asset_content_type: application/json
-
+      # Release asset publication is handled by .github/workflows/release.yml,
+      # which creates the GitHub Release and uploads artifacts atomically.
   sbom-python:
     name: Python Dependencies SBOM
     runs-on: ubuntu-latest
@@ -102,42 +93,7 @@ jobs:
           path: sbom-python.cyclonedx.json
           retention-days: 90
 
-      - name: Attach SBOM to release (on tag push)
-        if: startsWith(github.ref, 'refs/tags/')
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ github.event.release.upload_url }}
-          asset_path: sbom-python.cyclonedx.json
-          asset_name: sbom-python.cyclonedx.json
-          asset_content_type: application/json
-
-  sbom-attest:
-    name: SBOM Attestation (SLSA)
-    needs: [sbom-container, sbom-python]
-    if: startsWith(github.ref, 'refs/tags/')
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    permissions:
-      id-token: write
-      attestations: write
-      contents: read
-    steps:
-      - name: Download container SBOM
-        uses: actions/download-artifact@v4
-        with:
-          name: sbom-container
-          path: sbom-artifacts
-
-      - name: Download Python SBOM
-        uses: actions/download-artifact@v4
-        with:
-          name: sbom-python
-          path: sbom-artifacts
-
-      - name: Generate SLSA provenance attestation
-        uses: slsa-framework/slsa-github-generator/.github/workflows/generator_generic_slsa3.yml@v1.9.0
-        with:
-          base64-subjects: "${{ toJson(github.event.repository) }}"
-          provenance-name: slsa-provenance.intoto.jsonl
+      # Release asset publication is handled by .github/workflows/release.yml.
+  # SLSA provenance/attestation can be added as a separate job-level reusable
+  # workflow with correctly computed artifact subjects. The prior step-level
+  # reusable-workflow invocation was structurally invalid for GitHub Actions.

@@ -84,16 +84,27 @@ dependency graph.
 The accuracy and regression tests read their fixtures from a checkout of
 [opencv_extra](https://github.com/opencv/opencv_extra) (branch `3.0` for this
 tree). Without it, data-driven tests report `FAIL_INVALID_TEST_DATA` instead of
-passing, so set it up once:
+passing.
+
+For a fresh clone, use the helper script to fetch/update the matching fixtures
+(idempotent, shallow clone):
+
+```bash
+./scripts/fetch-test-data.sh .cache/opencv_extra
+export OPENCV_TEST_DATA_PATH="$PWD/.cache/opencv_extra"
+```
+
+You can also clone `opencv_extra` manually:
 
 ```bash
 git clone -b 3.0 --depth 1 https://github.com/opencv/opencv_extra ../opencv_extra
+export OPENCV_TEST_DATA_PATH="$PWD/../opencv_extra"
 ```
 
 Then configure with the data path and run the suite:
 
 ```bash
-cmake -S . -B build -DOPENCV_TEST_DATA_PATH="$PWD/../opencv_extra" -DBUILD_TESTS=ON
+cmake -S . -B build -DOPENCV_TEST_DATA_PATH="$OPENCV_TEST_DATA_PATH" -DBUILD_TESTS=ON
 cmake --build build --parallel $(nproc)
 ctest --test-dir build --output-on-failure
 ```
@@ -144,6 +155,11 @@ cp .env.example .env
 docker compose build
 docker compose run --rm opencv                  # configure + build + test
 ```
+
+If `OPENCV_TEST_DATA_PATH` is unset, the compose service attempts to bootstrap
+`opencv_extra` (branch `3.0`) into `.cache/opencv_extra` using
+`scripts/fetch-test-data.sh` before configuring and running tests. Set
+`OPENCV_TEST_DATA_PATH` explicitly to use a pre-existing checkout.
 
 ### Troubleshooting
 

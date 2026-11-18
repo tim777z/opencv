@@ -35,8 +35,8 @@ jobs:
         uses: github/codeql-action/init@v3
         with:
           languages: ${{ matrix.language }}
-          # Use the extended query suite for deeper coverage
-          queries: +security-extended,+security-and-quality
+          # Query suites and path filters are defined in the config file to keep
+          # behavior in one place and avoid init/config drift.
           config-file: .github/codeql/codeql-config.yml
 
       - name: Install build dependencies
