@@ -24,8 +24,9 @@ services:
     environment:
       BUILD_JOBS: ${BUILD_JOBS:-4}
       CCACHE_DIR: /ccache
-      # Export this in your shell (or .env) after cloning opencv_extra, e.g.
-      #   git clone -b 3.0 --depth 1 https://github.com/Itseez/opencv_extra ..
+      # Test fixtures (opencv_extra). If unset, the container bootstraps a shallow
+      # checkout into /src/.cache/opencv_extra via scripts/fetch-test-data.sh so a
+      # fresh clone can run the accuracy suite without manual setup.
       OPENCV_TEST_DATA_PATH: ${OPENCV_TEST_DATA_PATH:-}
     volumes:
       # Live source: edit on the host, rebuild inside the container. The mount
@@ -42,6 +43,16 @@ services:
       - -lc
       - |
         set -euo pipefail
+        if [ -z "${OPENCV_TEST_DATA_PATH:-}" ]; then
+          export OPENCV_TEST_DATA_PATH=/src/.cache/opencv_extra
+        fi
+        if [ ! -d "${OPENCV_TEST_DATA_PATH}/.git" ] && [ -d "${OPENCV_TEST_DATA_PATH}" ] && [ "$(ls -A "${OPENCV_TEST_DATA_PATH}" 2>/dev/null || true)" ]; then
+          echo "Using existing non-git test data at ${OPENCV_TEST_DATA_PATH}"
+        elif [ ! -d "${OPENCV_TEST_DATA_PATH}/.git" ]; then
+          echo "Bootstrapping OpenCV test data at ${OPENCV_TEST_DATA_PATH}"
+          bash /src/scripts/fetch-test-data.sh "${OPENCV_TEST_DATA_PATH}" || \
+            echo "warning: could not fetch opencv_extra; data-driven tests may report FAIL_INVALID_TEST_DATA" >&2
+        fi
         cmake -S /src -B /src/build -G Ninja \
           -DCMAKE_BUILD_TYPE=Release \
           -DCMAKE_C_COMPILER_LAUNCHER=ccache \

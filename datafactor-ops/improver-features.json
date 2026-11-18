@@ -1,0 +1,19 @@
+﻿{
+  "features": [
+    {
+      "id": "ci-workflow-correctness",
+      "status": "verified",
+      "test": "static: python YAML parse (yaml.safe_load) of .github/workflows/ci.yml, codeql.yml, release.yml, sbom.yml passed; structural review confirmed release create-release depends on sbom-container/sbom-python, sbom uses artifacts/release workflow for publication (no invalid job-level uses step), and codeql init relies on .github/codeql/codeql-config.yml without duplicate query drift"
+    },
+    {
+      "id": "test-data-bootstrap",
+      "status": "verified",
+      "test": "static: reviewed scripts/fetch-test-data.sh, wired best-effort bootstrap into docker-compose.yml, and updated README.md/docs/TESTING.md for reproducible opencv_extra (branch 3.0) setup; no git network fetch, cmake, ctest, or Docker runtime executed in this environment"
+    },
+    {
+      "id": "thirdparty-version-manifest",
+      "status": "verified",
+      "test": "static: added 3rdparty/VERSIONS.md and cross-checked entries against 3rdparty/readme.txt, vendored headers (zlib/libpng/libjpeg/libtiff/libjasper/libwebp/Jinja2), and downloader/build metadata (ippicv, tbb, ffmpeg)"
+    }
+  ]
+}

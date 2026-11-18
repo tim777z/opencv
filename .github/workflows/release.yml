@@ -162,7 +162,7 @@ jobs:
 
   create-release:
     name: Create GitHub Release
-    needs: [validate-tag, build-release, generate-changelog, sbom]
+    needs: [validate-tag, build-release, generate-changelog, sbom-container, sbom-python]
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
