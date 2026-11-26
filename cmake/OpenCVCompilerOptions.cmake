@@ -211,6 +211,26 @@ if(CMAKE_COMPILER_IS_GNUCXX)
   endif()
 
   # Profiling?
+  # Security hardening (Linux/GCC/Clang). These flags reduce exploitability of
+  # memory/format-string bugs in image/video parsers and native code paths.
+  # Guarded by compiler support checks to avoid breaking legacy toolchains.
+  # Note: -fPIE/-pie are intentionally not forced globally here because this
+  # legacy tree mixes shared libraries and executables; PIE is best applied by
+  # the build environment/toolchain or per-target where appropriate.
+  if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_COMPILER_IS_CLANGCXX)
+    if(NOT MINGW AND NOT APPLE)
+      add_extra_compiler_option(-fstack-protector-strong)
+      if(NOT HAVE_CXX_FSTACK_PROTECTOR_STRONG)
+        add_extra_compiler_option(-fstack-protector)
+      endif()
+      # FORTIFY_SOURCE requires optimization; only enable for non-Debug builds.
+      if(NOT CMAKE_BUILD_TYPE STREQUAL "Debug")
+        add_extra_compiler_option(-D_FORTIFY_SOURCE=2)
+      endif()
+      set(OPENCV_EXTRA_EXE_LINKER_FLAGS "${OPENCV_EXTRA_EXE_LINKER_FLAGS} -Wl,-z,relro -Wl,-z,now")
+    endif()
+  endif()
+
   if(ENABLE_PROFILING)
     add_extra_compiler_option("-pg -g")
     # turn off incompatible options
